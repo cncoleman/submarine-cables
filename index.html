@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Shape of the Undersea Internet</title>
+<meta name="description" content="A network analysis of the world's submarine fiber-optic cables — connectivity versus transit centrality, by the numbers.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="./vendor/chart.umd.js"></script>
+<script src="./vendor/d3.min.js"></script>
+<script src="./vendor/topojson-client.min.js"></script>
+<style>
+:root{
+  --abyss:#05121f; --deep:#0a1f33; --panel:#0e2a42; --panel-2:#103450;
+  --line:rgba(120,180,210,.16); --line-strong:rgba(120,180,210,.34);
+  --ink:#dcecf5; --ink-dim:#7fa6bd; --ink-faint:#54798f;
+  --signal:#38e1d6; --signal-deep:#149c97;
+  --warm:#ff8a5b; --warm-deep:#c2552c;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+  --display:'Space Grotesk',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--abyss); color:var(--ink); font-family:var(--display);
+  line-height:1.6; -webkit-font-smoothing:antialiased;
+  background-image:radial-gradient(ellipse 80% 50% at 50% -10%, rgba(20,156,151,.10), transparent 70%);
+}
+.wrap{max-width:1080px; margin:0 auto; padding:0 24px}
+a{color:var(--signal); text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* ---- hero ---- */
+header.hero{padding:88px 0 56px; position:relative; overflow:hidden}
+.eyebrow{font-family:var(--mono); font-size:13px; letter-spacing:.22em; text-transform:uppercase; color:var(--signal); margin-bottom:24px}
+h1{font-size:clamp(38px,6.2vw,68px); font-weight:700; line-height:1.02; letter-spacing:-.02em; max-width:15ch}
+h1 em{font-style:normal; color:var(--ink-dim)}
+.lede{font-size:clamp(17px,2.2vw,21px); color:var(--ink-dim); max-width:60ch; margin-top:24px; line-height:1.55}
+.source{font-family:var(--mono); font-size:12.5px; color:var(--ink-faint); margin-top:28px; letter-spacing:.02em}
+
+/* ---- stat strip ---- */
+.strip{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:14px; overflow:hidden; margin:48px 0 8px}
+.stat{background:var(--deep); padding:22px 20px}
+.stat .n{font-family:var(--mono); font-size:30px; font-weight:600; color:var(--ink); letter-spacing:-.01em; line-height:1}
+.stat .n small{font-size:15px; color:var(--ink-dim); font-weight:400}
+.stat .l{font-size:13px; color:var(--ink-faint); margin-top:9px; letter-spacing:.01em}
+
+/* ---- sections ---- */
+section{padding:64px 0; border-top:1px solid var(--line)}
+.sec-head{display:flex; align-items:baseline; gap:16px; margin-bottom:8px}
+.sec-num{font-family:var(--mono); font-size:13px; color:var(--signal); letter-spacing:.1em}
+h2{font-size:clamp(26px,3.6vw,38px); font-weight:700; letter-spacing:-.015em; line-height:1.1}
+.sec-intro{color:var(--ink-dim); max-width:64ch; margin-top:18px; font-size:17px}
+
+/* ---- chart panel ---- */
+.panel{background:linear-gradient(180deg,var(--panel),var(--deep)); border:1px solid var(--line); border-radius:16px; padding:26px 26px 30px; margin-top:34px}
+.legend{display:flex; flex-wrap:wrap; gap:22px; font-family:var(--mono); font-size:12.5px; color:var(--ink-dim); margin-bottom:18px; letter-spacing:.01em}
+.legend span{display:flex; align-items:center; gap:8px}
+.swatch{width:12px; height:12px; border-radius:3px; display:inline-block}
+.chart-box{position:relative; width:100%}
+.note{font-size:14px; color:var(--ink-faint); margin-top:18px; line-height:1.55; font-style:italic}
+
+/* ---- callout cards ---- */
+.cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; margin-top:34px}
+.card{background:var(--deep); border:1px solid var(--line); border-radius:14px; padding:22px; transition:border-color .2s}
+.card:hover{border-color:var(--line-strong)}
+.card .tag{font-family:var(--mono); font-size:11.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--signal); margin-bottom:12px}
+.card h3{font-size:19px; font-weight:500; margin-bottom:8px}
+.card p{font-size:15px; color:var(--ink-dim); line-height:1.55}
+.card .big{font-family:var(--mono); font-size:15px; color:var(--warm)}
+
+/* ---- corridors table ---- */
+.corridors{margin-top:30px; border:1px solid var(--line); border-radius:14px; overflow:hidden}
+.corridor{display:grid; grid-template-columns:40px 1fr auto; align-items:center; gap:16px; padding:14px 22px; border-bottom:1px solid var(--line); background:var(--deep)}
+.corridor:last-child{border-bottom:none}
+.corridor .rk{font-family:var(--mono); font-size:13px; color:var(--ink-faint)}
+.corridor .route{font-size:16px}
+.corridor .route b{font-weight:500}
+.bar-wrap{display:flex; align-items:center; gap:12px; font-family:var(--mono); font-size:13px; color:var(--signal)}
+.bar{height:7px; border-radius:4px; background:var(--signal); opacity:.85}
+
+/* ---- footer ---- */
+footer{padding:56px 0 72px; border-top:1px solid var(--line); color:var(--ink-faint); font-size:14px}
+footer .mono{font-family:var(--mono); font-size:12.5px; line-height:1.8}
+.pill{display:inline-block; font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--signal-deep); border:1px solid var(--line-strong); border-radius:20px; padding:4px 12px; margin-top:4px}
+
+@media (max-width:640px){
+  header.hero{padding:60px 0 40px}
+  .sec-head{flex-direction:column; gap:6px}
+  .corridor{grid-template-columns:30px 1fr; }
+  .corridor .bar-wrap{grid-column:2; justify-content:flex-start}
+}
+/* ---- map ---- */
+#mapBox svg{display:block; width:100%; height:auto}
+#mapBox path{cursor:default; transition:opacity .12s}
+#mapBox path.hl{stroke:var(--signal); stroke-width:1.2px}
+.map-legend{display:flex; align-items:center; gap:2px; margin-top:18px; font-family:var(--mono); font-size:11.5px; color:var(--ink-dim)}
+.map-legend .scale{display:flex; height:10px; flex:0 0 auto}
+.map-legend .scale i{width:30px; height:10px; display:block}
+.map-legend .cap{margin:0 8px}
+.map-tip{font-family:var(--mono); font-size:13.5px; color:var(--ink); margin-top:14px; min-height:20px}
+.map-tip b{color:var(--signal)}
+
+/* ---- sim controls ---- */
+.sim-controls{margin-top:22px; display:flex; align-items:center; gap:18px; flex-wrap:wrap}
+.sim-controls input[type=range]{flex:1; min-width:200px; accent-color:var(--warm)}
+.sim-readout{font-family:var(--mono); font-size:13px; color:var(--ink-dim); display:flex; flex-direction:column; gap:2px; min-width:160px}
+.sim-readout #rLast{color:var(--warm)}
+.sim-stats{display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:12px; overflow:hidden; margin-top:20px}
+.sim-stats .s{background:var(--deep); padding:16px 18px}
+.sim-stats .s .v{font-family:var(--mono); font-size:24px; font-weight:600; color:var(--ink)}
+.sim-stats .s .v.warm{color:var(--warm)}
+.sim-stats .s .v.cool{color:#5fb8e8}
+.sim-stats .s .k{font-size:12.5px; color:var(--ink-faint); margin-top:6px}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Network analysis · submarine cables</div>
+    <h1>The internet has a shape. <em>Most of it is underwater.</em></h1>
+    <p class="lede">Around 500 fiber-optic cables carry nearly all intercontinental traffic across the seafloor. Drawn as a graph — landing stations as nodes, shared cables as edges — the network reveals a hierarchy the map alone hides: the places with the <strong style="color:var(--ink)">most cables</strong> are rarely the places the network <strong style="color:var(--ink)">can least afford to lose</strong>.</p>
+    <p class="source">Data: TeleGeography v3 API (community mirror) · 503 systems · 1,335 landing points · analyzed with NetworkX</p>
+
+    <div class="strip">
+      <div class="stat"><div class="n">503</div><div class="l">cable systems · 59 planned</div></div>
+      <div class="stat"><div class="n">1,335</div><div class="l">landing points (nodes)</div></div>
+      <div class="stat"><div class="n">8,553</div><div class="l">connections (edges)</div></div>
+      <div class="stat"><div class="n">0.96<small>%</small></div><div class="l">graph density</div></div>
+      <div class="stat"><div class="n">1.65<small>M km</small></div><div class="l">total cable length</div></div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section id="contrast">
+    <div class="sec-head"><span class="sec-num">01</span><h2>Two ways to be important</h2></div>
+    <p class="sec-intro">Each country gets two scores. <strong style="color:#5fb8e8">Connectivity</strong> counts how many other countries it shares a cable with — raw presence in the network. <strong style="color:var(--warm)">Betweenness</strong> measures how many of all country-to-country shortest paths run through it — its role as a relay. Sorted by betweenness, the gap between the bars is the whole story.</p>
+
+    <div class="panel">
+      <div class="legend">
+        <span><span class="swatch" style="background:#3c9fe0"></span>Distinct country connections</span>
+        <span><span class="swatch" style="background:#ff8a5b"></span>Betweenness centrality × 100</span>
+      </div>
+      <div class="chart-box" style="height:640px">
+        <canvas id="cChart" role="img" aria-label="Country connectivity versus betweenness centrality, sorted by betweenness. The United States has by far the highest betweenness while France leads raw connectivity.">The United States has betweenness 0.43, more than triple any other country, while France, Egypt and India rank high on connectivity but low on transit.</canvas>
+      </div>
+      <p class="note">The United States sits on 43% of all inter-country shortest paths — a single point of transit dominance unmatched anywhere else. France, Egypt, India and Italy show the inverse: dense connectivity, modest transit. They are destinations, not corridors.</p>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="tag">The dominant relay</div>
+        <h3>United States</h3>
+        <p>2nd in raw connections, but <span class="big">0.43</span> betweenness — over 3× the runner-up. Remove it and the Atlantic and Pacific halves of the graph barely talk.</p>
+      </div>
+      <div class="card">
+        <div class="tag">Small node, big role</div>
+        <h3>Fiji &amp; Australia</h3>
+        <p>Few connections each, yet high betweenness — they are the <span class="big">Pacific stepping-stones</span> almost every trans-Pacific path must cross.</p>
+      </div>
+      <div class="card">
+        <div class="tag">Connected, not critical</div>
+        <h3>France · Egypt · India</h3>
+        <p>Top-six by connectivity, but low transit. Traffic <span class="big">terminates</span> here more than it passes through. Egypt is the exception that proves it — see the Red Sea corridor.</p>
+      </div>
+      <div class="card">
+        <div class="tag">The quiet gateway</div>
+        <h3>Portugal</h3>
+        <p>3rd by connectivity. Sines is the European landfall for cables from <span class="big">Brazil, Africa &amp; the Med</span> — punching far above the country's size.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="corridors">
+    <div class="sec-head"><span class="sec-num">02</span><h2>The busiest corridors</h2></div>
+    <p class="sec-intro">Where connectivity concentrates: country pairs ranked by the number of distinct cables running between them. The Red Sea / Suez land bridge (Egypt) and the Singapore–Indonesia strait recur — the network's true pinch points.</p>
+
+    <div class="corridors" id="corridorList"></div>
+    <p class="note">Egypt appears in three of the top corridors — every Europe-to-Asia route funnels through the Suez land crossing, the most consequential chokepoint on the planet for internet traffic.</p>
+  </section>
+
+  <section id="growth">
+    <div class="sec-head"><span class="sec-num">03</span><h2>Built in waves</h2></div>
+    <p class="sec-intro">Cable systems by ready-for-service year. Two booms stand out: the dot-com build-out around 2000, and the current content-provider era — Google, Meta and Amazon now fund a large share of new capacity, pushing 2022–2023 to record counts.</p>
+    <div class="panel">
+      <div class="chart-box" style="height:300px">
+        <canvas id="gChart" role="img" aria-label="Number of submarine cables entering service per year from 1990 to 2026, showing peaks around 2000 and 2022 to 2023.">Cable deployments peaked around 2000 and again in 2022 and 2023 with 24 systems each.</canvas>
+      </div>
+    </div>
+  </section>
+
+  <section id="map">
+    <div class="sec-head"><span class="sec-num">04</span><h2>The chokepoint map</h2></div>
+    <p class="sec-intro">The same betweenness score, drawn geographically. Darker countries carry more of the world's inter-country shortest paths — they are the relays the network leans on. Hover any country for its score. Note how the load clusters: North America, the UK–France–Iberia gateway, the Red Sea funnel, and the Pacific island chain.</p>
+
+    <div class="panel">
+      <div id="mapBox" style="width:100%"></div>
+      <div class="map-legend" id="mapLegend"></div>
+      <div class="map-tip" id="mapTip" role="status" aria-live="polite">Hover a country</div>
+      <p class="note">Small island relays (Guam, Singapore, French Polynesia) carry real transit weight but are too small to shade at this scale — they appear in the bar chart above. Countries with no submarine cables are left unshaded.</p>
+    </div>
+  </section>
+
+  <section id="resilience">
+    <div class="sec-head"><span class="sec-num">05</span><h2>What breaks first</h2></div>
+    <p class="sec-intro">A failure simulation. Starting from the intact graph, we pull out countries one at a time and measure the largest surviving connected cluster — the share of landing points that can still reach each other. Removing the <strong style="color:var(--warm)">highest-betweenness countries</strong> tears the network apart; removing the <strong style="color:#5fb8e8">same number at random</strong> barely scratches it. That gap is what "critical infrastructure" means, quantified.</p>
+
+    <div class="panel">
+      <div class="legend">
+        <span><span class="swatch" style="background:#ff8a5b"></span>Targeted removal (by betweenness)</span>
+        <span><span class="swatch" style="background:#3c9fe0"></span>Random removal</span>
+      </div>
+      <div class="chart-box" style="height:340px">
+        <canvas id="rChart" role="img" aria-label="Resilience simulation: largest connected cluster as countries are removed. Targeted removal of high-betweenness countries collapses connectivity from 71 percent to 34 percent; random removal stays near 68 percent.">Removing the 15 highest-betweenness countries shrinks the largest cluster from 71 percent to 34 percent of landing points, while random removal leaves it near 68 percent.</canvas>
+      </div>
+      <div class="sim-controls">
+        <input type="range" id="rSlider" min="0" max="15" value="0" step="1" aria-label="Number of countries removed">
+        <div class="sim-readout">
+          <span id="rRemoved">0 removed</span>
+          <span id="rLast"></span>
+        </div>
+      </div>
+      <div class="sim-stats" id="rStats"></div>
+      <p class="note">The cliff at step 10 is Brazil — specifically Fortaleza, the South Atlantic's pivot. Once it goes, the Americas–Africa–Europe paths that routed through it have nowhere to reconverge, and the giant cluster drops from 51% to 38% in a single removal.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  <span class="pill">Reproducible</span>
+  <p style="margin-top:16px; max-width:60ch; color:var(--ink-dim)">Built from TeleGeography's public GeoJSON API. The graph treats every landing point on a cable as connected to every other; country-level edges aggregate those links. Betweenness computed on the largest connected component (955 of 1,335 nodes).</p>
+  <p class="mono" style="margin-top:20px">
+    source · submarinecablemap.com/api/v3<br>
+    method · python + networkx · charts via chart.js<br>
+    note · figures from a community data mirror; live counts run higher
+  </p>
+</footer>
+
+<script>
+const DATA = [
+ ['United States',72,42.93],['United Kingdom',67,13.28],['France',74,8.79],['Australia',38,7.74],
+ ['Portugal',70,5.01],['Spain',55,4.99],['Denmark',40,4.95],['Japan',44,4.10],
+ ['Fiji',16,4.00],['Brazil',36,3.67],['Sweden',38,2.75],['Singapore',46,2.66],
+ ['Turkey',30,2.59],['Malaysia',40,2.49],['Italy',64,2.37],['Egypt',65,2.20],
+ ['India',65,2.10],['Saudi Arabia',64,1.90],['South Africa',49,1.80]
+];
+const CORRIDORS = [
+ ['Indonesia','Singapore',19],['Egypt','Saudi Arabia',15],['India','Saudi Arabia',13],
+ ['Japan','China',12],['Singapore','Malaysia',12],['Egypt','France',12],
+ ['Denmark','Sweden',12],['UAE','Saudi Arabia',12],['Saudi Arabia','Djibouti',12],
+ ['Ireland','United Kingdom',12]
+];
+const GROWTH = {1990:2,1991:2,1992:7,1993:4,1994:18,1995:12,1996:4,1997:19,1998:9,1999:22,2000:21,2001:16,2002:11,2003:7,2004:11,2005:13,2006:11,2007:11,2008:20,2009:17,2010:14,2011:14,2012:22,2013:11,2014:15,2015:9,2016:15,2017:15,2018:18,2019:23,2020:21,2021:17,2022:24,2023:24,2024:12,2025:4,2026:1};
+
+const MAPBC={"Canada":0.0204,"United States of America":0.4293,"Italy":0.0237,"Argentina":0.0002,"Greece":0.0108,"Japan":0.041,"Taiwan":0.0052,"Spain":0.0499,"Colombia":0.0021,"Jamaica":0.0033,"China":0.0082,"South Korea":0.0049,"Indonesia":0.0219,"Thailand":0.0124,"Fiji":0.04,"Algeria":0.0001,"Cyprus":0.0071,"Egypt":0.0175,"France":0.0879,"Denmark":0.0495,"Sweden":0.0275,"Oman":0.0131,"Pakistan":0.0076,"United Arab Emirates":0.0102,"India":0.0155,"Lebanon":0.0003,"Saudi Arabia":0.0109,"Australia":0.0774,"New Zealand":0.0007,"Finland":0.0075,"Germany":0.0158,"Angola":0.0087,"Brazil":0.0367,"Malaysia":0.0249,"Philippines":0.0092,"Kenya":0.0071,"Iceland":0.0032,"Norway":0.0001,"Brunei":0.0052,"Vietnam":0.0074,"Bahamas":0.0032,"Georgia":0.0004,"Russia":0.022,"Myanmar":0.0006,"Benin":0.0002,"Cameroon":0.0057,"Côte d'Ivoire":0.0042,"Gabon":0.0033,"Ghana":0.004,"Nigeria":0.0056,"Portugal":0.0501,"Senegal":0.0032,"South Africa":0.0097,"Dominican Rep.":0.0057,"Guatemala":0.0005,"Mexico":0.0003,"Morocco":0.003,"Turkey":0.0259,"Papua New Guinea":0.0002,"Trinidad and Tobago":0.0127,"Venezuela":0.0034,"Ireland":0.003,"United Kingdom":0.1328,"Djibouti":0.0078,"Somalia":0.0008,"Yemen":0.001,"Bulgaria":0.0034,"Costa Rica":0.0001,"Honduras":0.0001,"Panama":0.0014,"Jordan":0.0004,"Ecuador":0.0002,"Netherlands":0.0017,"Madagascar":0.0018,"Sri Lanka":0.0029,"Sudan":0.0007,"Kuwait":0.0007,"Iraq":0.0007,"Qatar":0.0018,"Belgium":0.0016,"Namibia":0.0002,"Togo":0.0003,"Bangladesh":0.0001};
+
+const TARGETED=[{k:0,country:"—",giant:71.5},{k:1,country:"United States",giant:62.2},{k:2,country:"United Kingdom",giant:59.4},{k:3,country:"France",giant:59.1},{k:4,country:"Australia",giant:55.7},{k:5,country:"Portugal",giant:54.5},{k:6,country:"Spain",giant:52.7},{k:7,country:"Denmark",giant:52.7},{k:8,country:"Japan",giant:50.9},{k:9,country:"Fiji",giant:50.9},{k:10,country:"Brazil",giant:37.5},{k:11,country:"Sweden",giant:37.5},{k:12,country:"Singapore",giant:36.9},{k:13,country:"Turkey",giant:36.6},{k:14,country:"Malaysia",giant:35.4},{k:15,country:"Italy",giant:33.9}];
+const RANDOM=[{k:0,country:"—",giant:71.5},{k:1,country:"Tonga",giant:71.3},{k:2,country:"New Caledonia",giant:70.9},{k:3,country:"Equatorial Guinea",giant:70.6},{k:4,country:"Guinea",giant:70.6},{k:5,country:"Georgia",giant:70.6},{k:6,country:"Norway",giant:70.3},{k:7,country:"Oman",giant:69.7},{k:8,country:"Thailand",giant:69.4},{k:9,country:"Dominica",giant:69.2},{k:10,country:"Iran",giant:68.7},{k:11,country:"South Korea",giant:68.5},{k:12,country:"Congo",giant:68.4},{k:13,country:"Cuba",giant:68.2},{k:14,country:"Malta",giant:67.9},{k:15,country:"Greece",giant:67.5}];
+
+const FONT = "'IBM Plex Mono', monospace";
+const GRID = 'rgba(120,180,210,.10)';
+const TICK = '#7fa6bd';
+
+function buildContrast(){
+  new Chart(document.getElementById('cChart'),{
+    type:'bar',
+    data:{ labels:DATA.map(r=>r[0]), datasets:[
+      {label:'Connections', data:DATA.map(r=>r[1]), backgroundColor:'#3c9fe0', borderRadius:3, barPercentage:.82, categoryPercentage:.78},
+      {label:'Betweenness ×100', data:DATA.map(r=>r[2]), backgroundColor:'#ff8a5b', borderRadius:3, barPercentage:.82, categoryPercentage:.78}
+    ]},
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{
+        backgroundColor:'#0a1f33', borderColor:'rgba(120,180,210,.3)', borderWidth:1,
+        titleFont:{family:FONT}, bodyFont:{family:FONT},
+        callbacks:{ label:c=> c.datasetIndex===1 ? `betweenness ${(c.raw/100).toFixed(4)}` : `${c.raw} connections` } }},
+      scales:{
+        x:{ ticks:{color:TICK, font:{family:FONT,size:11}}, grid:{color:GRID}, border:{display:false}},
+        y:{ ticks:{color:'#dcecf5', font:{family:FONT,size:11.5}}, grid:{display:false}, border:{display:false}}
+      } }
+  });
+}
+
+function buildCorridors(){
+  const max = Math.max(...CORRIDORS.map(c=>c[2]));
+  const el = document.getElementById('corridorList');
+  el.innerHTML = CORRIDORS.map((c,i)=>`
+    <div class="corridor">
+      <span class="rk">${String(i+1).padStart(2,'0')}</span>
+      <span class="route"><b>${c[0]}</b> &nbsp;⟷&nbsp; <b>${c[1]}</b></span>
+      <span class="bar-wrap"><span class="bar" style="width:${Math.round(c[2]/max*120)}px"></span>${c[2]}</span>
+    </div>`).join('');
+}
+
+function buildGrowth(){
+  const yrs = Object.keys(GROWTH).map(Number).sort((a,b)=>a-b);
+  new Chart(document.getElementById('gChart'),{
+    type:'bar',
+    data:{ labels:yrs, datasets:[{ data:yrs.map(y=>GROWTH[y]),
+      backgroundColor:yrs.map(y=> y>=2020?'#38e1d6':'#1d6e8c'), borderRadius:2 }]},
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{
+        backgroundColor:'#0a1f33', borderColor:'rgba(120,180,210,.3)', borderWidth:1,
+        titleFont:{family:FONT}, bodyFont:{family:FONT},
+        callbacks:{ label:c=>`${c.raw} cables` } }},
+      scales:{
+        x:{ ticks:{color:TICK, font:{family:FONT,size:10}, maxRotation:0, autoSkip:true, maxTicksLimit:10}, grid:{display:false}, border:{display:false}},
+        y:{ ticks:{color:TICK, font:{family:FONT,size:10}}, grid:{color:GRID}, border:{display:false}}
+      } }
+  });
+}
+
+function buildMap(){
+  const box = document.getElementById('mapBox');
+  const W=960, H=500;
+  const svg = d3.select(box).append('svg')
+    .attr('viewBox', `0 0 ${W} ${H}`).attr('width','100%')
+    .attr('role','img').attr('aria-label','World map shaded by submarine cable betweenness centrality');
+  const vals = Object.values(MAPBC);
+  const max = Math.max(...vals);
+  // log-ish scale: most countries are small, US is an outlier. Use sqrt for spread.
+  const ramp = ['#0e3147','#0f4a5e','#117d76','#1aa39a','#38e1d6'];
+  const color = d3.scaleThreshold()
+    .domain([0.005,0.02,0.05,0.12])
+    .range(ramp);
+  const projection = d3.geoNaturalEarth1().scale(170).translate([W/2,H/2+15]);
+  const path = d3.geoPath(projection);
+  const tip = document.getElementById('mapTip');
+
+  d3.json('./vendor/countries-110m.json').then(topo=>{
+    const countries = topojson.feature(topo, topo.objects.countries).features;
+    svg.append('g').selectAll('path').data(countries).join('path')
+      .attr('d', path)
+      .attr('fill', d=>{ const v=MAPBC[d.properties.name]; return v?color(v):'#0a2030'; })
+      .attr('stroke', '#05121f').attr('stroke-width',0.4)
+      .on('mousemove', function(e,d){
+        const v=MAPBC[d.properties.name];
+        d3.select(this).classed('hl',true).raise();
+        tip.innerHTML = v
+          ? `<b>${d.properties.name}</b> — betweenness ${v.toFixed(4)}`
+          : `<b>${d.properties.name}</b> — no submarine cables in dataset`;
+      })
+      .on('mouseleave', function(){ d3.select(this).classed('hl',false); });
+    // graticule outline for depth
+    svg.append('path').datum(d3.geoGraticule10())
+      .attr('d',path).attr('fill','none').attr('stroke','rgba(120,180,210,.06)').attr('stroke-width',0.4).lower();
+  });
+
+  // legend
+  const labels=['0','.005','.02','.05','.12+'];
+  const leg=document.getElementById('mapLegend');
+  leg.innerHTML = `<span class="cap">less transit</span><span class="scale">`+
+    ['#0a2030',...ramp].map(c=>`<i style="background:${c}"></i>`).join('')+
+    `</span><span class="cap">more transit</span>`;
+}
+
+let rChart;
+function buildResilience(){
+  const labels = TARGETED.map(d=>d.k);
+  rChart = new Chart(document.getElementById('rChart'),{
+    type:'line',
+    data:{ labels, datasets:[
+      { label:'Targeted', data:TARGETED.map(d=>d.giant), borderColor:'#ff8a5b', backgroundColor:'rgba(255,138,91,.12)',
+        fill:true, tension:.18, pointRadius:3, pointBackgroundColor:'#ff8a5b', borderWidth:2 },
+      { label:'Random', data:RANDOM.map(d=>d.giant), borderColor:'#3c9fe0', backgroundColor:'transparent',
+        borderDash:[6,4], tension:.18, pointRadius:3, pointBackgroundColor:'#3c9fe0', borderWidth:2 }
+    ]},
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{
+        backgroundColor:'#0a1f33', borderColor:'rgba(120,180,210,.3)', borderWidth:1,
+        titleFont:{family:FONT}, bodyFont:{family:FONT},
+        callbacks:{
+          title:items=>`${items[0].label} countries removed`,
+          label:c=>{ const set=c.datasetIndex===0?TARGETED:RANDOM; const row=set[c.dataIndex];
+            return `${c.dataset.label}: ${c.raw}% connected` + (row.country!=='—'?` (–${row.country})`:''); } }}},
+      scales:{
+        x:{ title:{display:true,text:'countries removed',color:TICK,font:{family:FONT,size:11}},
+            ticks:{color:TICK,font:{family:FONT,size:11}}, grid:{color:GRID}, border:{display:false}},
+        y:{ title:{display:true,text:'largest cluster (% of nodes)',color:TICK,font:{family:FONT,size:11}},
+            min:0,max:80, ticks:{color:TICK,font:{family:FONT,size:11},callback:v=>v+'%'}, grid:{color:GRID}, border:{display:false}}
+      } }
+  });
+
+  const slider=document.getElementById('rSlider');
+  const removed=document.getElementById('rRemoved');
+  const last=document.getElementById('rLast');
+  const stats=document.getElementById('rStats');
+  function render(k){
+    k=+k;
+    const t=TARGETED[k], r=RANDOM[k];
+    removed.textContent = `${k} ${k===1?'country':'countries'} removed`;
+    last.textContent = k>0 ? `last targeted: ${t.country}` : '';
+    const drop = (TARGETED[0].giant - t.giant).toFixed(1);
+    stats.innerHTML =
+      `<div class="s"><div class="v warm">${t.giant}%</div><div class="k">targeted — largest cluster</div></div>`+
+      `<div class="s"><div class="v cool">${r.giant}%</div><div class="k">random — largest cluster</div></div>`+
+      `<div class="s"><div class="v">${drop} pts</div><div class="k">connectivity lost (targeted)</div></div>`;
+    // emphasize current point
+    rChart.data.datasets[0].pointRadius = TARGETED.map((_,i)=> i===k?6:3);
+    rChart.data.datasets[1].pointRadius = RANDOM.map((_,i)=> i===k?6:3);
+    rChart.update('none');
+  }
+  slider.addEventListener('input', e=>render(e.target.value));
+  render(0);
+}
+
+buildContrast(); buildCorridors(); buildGrowth(); buildMap(); buildResilience();
+</script>
+</body>
+</html>
