@@ -103,6 +103,19 @@ footer .mono{font-family:var(--mono); font-size:12.5px; line-height:1.8}
 .map-tip{font-family:var(--mono); font-size:13.5px; color:var(--ink); margin-top:14px; min-height:20px}
 .map-tip b{color:var(--signal)}
 
+/* ---- cable route map ---- */
+#cableBox{position:relative; border-radius:14px; overflow:hidden; background:radial-gradient(ellipse 120% 90% at 50% 38%, #07273f, #03101b)}
+#cableBox svg{display:block; width:100%; height:auto; cursor:grab; touch-action:none}
+#cableBox svg:active{cursor:grabbing}
+#cableBox .land{fill:#0c2538; stroke:#163a52; stroke-width:.5px; vector-effect:non-scaling-stroke}
+#cableBox .cable{fill:none; stroke-width:.7px; stroke-opacity:.7; vector-effect:non-scaling-stroke; transition:stroke-opacity .1s}
+#cableBox.dim .cable{stroke-opacity:.13}
+#cableBox.dim .cable.on{stroke-opacity:1; stroke-width:1.9px}
+#cableBox .lp{fill:var(--signal); fill-opacity:.5; stroke:none; pointer-events:none}
+.map-controls{position:absolute; top:12px; right:12px; display:flex; flex-direction:column; gap:6px; z-index:2}
+.map-controls button{font-family:var(--mono); font-size:17px; width:32px; height:32px; line-height:1; color:var(--ink-dim); background:rgba(7,28,44,.82); border:1px solid var(--line-strong); border-radius:8px; cursor:pointer; transition:.15s}
+.map-controls button:hover{color:var(--signal); border-color:var(--signal-deep)}
+
 /* ---- sim controls ---- */
 .sim-controls{margin-top:22px; display:flex; align-items:center; gap:18px; flex-wrap:wrap}
 .sim-controls input[type=range]{flex:1; min-width:200px; accent-color:var(--warm)}
@@ -138,6 +151,23 @@ footer .mono{font-family:var(--mono); font-size:12.5px; line-height:1.8}
 </header>
 
 <main class="wrap">
+
+  <section id="cablemap" style="border-top:none; padding-top:44px">
+    <div class="sec-head"><span class="sec-num">00</span><h2>Every cable, drawn</h2></div>
+    <p class="sec-intro">The whole system, the way <a href="https://www.submarinecablemap.com" target="_blank" rel="noopener">TeleGeography maps it</a> — every in-service and planned submarine cable, traced along its real seabed route. This is the geography the analysis below abstracts away. Drag to pan, scroll or use the buttons to zoom, and hover any line to isolate a single cable.</p>
+
+    <div class="panel" style="padding:0; overflow:hidden">
+      <div id="cableBox">
+        <div class="map-controls">
+          <button id="cmIn" aria-label="Zoom in" title="Zoom in">+</button>
+          <button id="cmOut" aria-label="Zoom out" title="Zoom out">−</button>
+          <button id="cmReset" aria-label="Reset view" title="Reset view">⟳</button>
+        </div>
+      </div>
+    </div>
+    <div class="map-tip" id="cableTip" role="status" aria-live="polite">Hover a cable to trace it</div>
+    <p class="note">Source: TeleGeography open data (submarinecablemap.com/api/v3) — cable routes as GeoJSON, drawn with D3 on a Mercator projection. Line colors are TeleGeography's own per-cable palette; cyan dots are landing points.</p>
+  </section>
 
   <section id="contrast">
     <div class="sec-head"><span class="sec-num">01</span><h2>Two ways to be important</h2></div>
@@ -317,6 +347,58 @@ function buildGrowth(){
   });
 }
 
+function buildCableMap(){
+  const box = d3.select('#cableBox');
+  const W = 960, H = 540;
+  const svg = box.append('svg')
+    .attr('viewBox', `0 0 ${W} ${H}`)
+    .attr('role','img').attr('aria-label','World map of every submarine cable route, from TeleGeography open data');
+  const g = svg.append('g');
+  const tip = document.getElementById('cableTip');
+  // finite bounding box (drops the Mercator pole blow-up) used only to size the projection
+  const worldBox = {type:'Polygon', coordinates:[[[-180,80],[180,80],[180,-58],[-180,-58],[-180,80]]]};
+  const projection = d3.geoMercator();
+  const path = d3.geoPath(projection);
+
+  Promise.all([
+    d3.json('./vendor/countries-110m.json'),
+    d3.json('./vendor/cable-geo.json'),
+    d3.json('./vendor/landing-point-geo.json')
+  ]).then(([topo, cables, lps])=>{
+    projection.fitExtent([[0,0],[W,H]], worldBox);
+
+    const land = topojson.feature(topo, topo.objects.countries).features
+      .filter(d=> d.properties.name !== 'Antarctica');
+    g.append('g').selectAll('path').data(land).join('path')
+      .attr('class','land').attr('d', path);
+
+    const cableSel = g.append('g').selectAll('path').data(cables.features).join('path')
+      .attr('class','cable').attr('d', path)
+      .attr('stroke', d=> d.properties.color || '#38e1d6')
+      .on('mouseenter', function(e,d){
+        const id = d.properties.id;
+        box.classed('dim', true);
+        cableSel.classed('on', x=> x.properties.id === id);
+        cableSel.filter(x=> x.properties.id === id).raise();
+        tip.innerHTML = `<b>${d.properties.name}</b>`;
+      });
+    box.on('mouseleave', ()=>{ box.classed('dim',false); cableSel.classed('on',false); tip.textContent='Hover a cable to trace it'; });
+
+    g.append('g').selectAll('circle').data(lps.features).join('circle')
+      .attr('class','lp')
+      .attr('cx', d=> projection(d.geometry.coordinates)[0])
+      .attr('cy', d=> projection(d.geometry.coordinates)[1])
+      .attr('r', .9);
+
+    const zoom = d3.zoom().scaleExtent([1,9]).translateExtent([[0,0],[W,H]])
+      .on('zoom', e=> g.attr('transform', e.transform));
+    svg.call(zoom);
+    document.getElementById('cmIn').onclick    = ()=> svg.transition().duration(250).call(zoom.scaleBy, 1.6);
+    document.getElementById('cmOut').onclick   = ()=> svg.transition().duration(250).call(zoom.scaleBy, 1/1.6);
+    document.getElementById('cmReset').onclick = ()=> svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity);
+  });
+}
+
 function buildMap(){
   const box = document.getElementById('mapBox');
   const W=960, H=500;
@@ -411,7 +493,7 @@ function buildResilience(){
   render(0);
 }
 
-buildContrast(); buildCorridors(); buildGrowth(); buildMap(); buildResilience();
+buildCableMap(); buildContrast(); buildCorridors(); buildGrowth(); buildMap(); buildResilience();
 </script>
 </body>
 </html>
